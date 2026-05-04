@@ -1,0 +1,8 @@
+// Windows resource script.
+// Manifest is embedded with resource type RT_MANIFEST (24).
+// Icon (id IDI_APP=1) is added in phase 07 once assets/icon.ico is generated.
+
+#define IDI_APP 1
+
+1 24 "app.manifest"
+IDI_APP ICON "assets/icon.ico"

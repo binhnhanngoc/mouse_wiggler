@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Mouse Wiggler icon: stylized cursor with motion lines -->
+  <rect width="256" height="256" fill="#1e293b" rx="40"/>
+  <!-- Motion arc lines -->
+  <path d="M 60 70 Q 90 50 120 70" stroke="#38bdf8" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 50 100 Q 90 70 130 100" stroke="#38bdf8" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.4"/>
+  <!-- Cursor (arrow) -->
+  <path d="M 110 80 L 110 200 L 140 175 L 160 215 L 178 207 L 158 167 L 195 165 Z"
+        fill="#fbbf24" stroke="#0f172a" stroke-width="6" stroke-linejoin="round"/>
+</svg>
