@@ -45,6 +45,7 @@ const ID_INTERVAL_EDIT: u16 = 1002;
 const ID_START_BTN: u16 = 1003;
 const ID_AUTOSTART_CHK: u16 = 1004;
 const ID_STARTMIN_CHK: u16 = 1005;
+const ID_VISIBLE_DX_EDIT: u16 = 1006;
 
 pub const ID_TRAY_SHOW: u16 = 2001;
 pub const ID_TRAY_TOGGLE: u16 = 2002;
@@ -65,6 +66,7 @@ pub struct AppState {
     pub hwnd: HWND,
     pub combo: HWND,
     pub edit_interval: HWND,
+    pub edit_dx: HWND,
     pub btn_start: HWND,
     pub chk_autostart: HWND,
     pub chk_startmin: HWND,
@@ -78,14 +80,16 @@ pub struct AppState {
 impl AppState {
     fn new(cfg: Settings) -> Self {
         let mode = Mode::from_str_lossy(&cfg.mode);
+        let dx = cfg.visible_dx;
         Self {
             hwnd: HWND(null_mut()),
             combo: HWND(null_mut()),
             edit_interval: HWND(null_mut()),
+            edit_dx: HWND(null_mut()),
             btn_start: HWND(null_mut()),
             chk_autostart: HWND(null_mut()),
             chk_startmin: HWND(null_mut()),
-            jiggler: Jiggler::new(mode),
+            jiggler: Jiggler::new(mode, dx),
             settings: cfg,
             running: false,
             suppress_save: Cell::new(true),
@@ -129,7 +133,7 @@ pub fn run(cfg: Settings) -> Result<()> {
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             260,
-            220,
+            252,
             HWND(null_mut()),
             HMENU(null_mut()),
             instance,
@@ -297,6 +301,8 @@ unsafe fn create_controls(st: &mut AppState) {
     create_static(hwnd, w!("Mode:"), s(12), s(12), s(60), s(20), inst);
     create_static(hwnd, w!("Every:"), s(12), s(42), s(60), s(20), inst);
     create_static(hwnd, w!("seconds"), s(178), s(42), s(70), s(20), inst);
+    create_static(hwnd, w!("Pixels:"), s(12), s(72), s(60), s(20), inst);
+    create_static(hwnd, w!("px (Visible)"), s(178), s(72), s(70), s(20), inst);
 
     // Mode combo
     let combo = CreateWindowExW(
@@ -341,6 +347,24 @@ unsafe fn create_controls(st: &mut AppState) {
     .unwrap_or_default();
     st.edit_interval = edit;
 
+    // Visible-mode dx edit
+    let edit_dx = CreateWindowExW(
+        WS_EX_CLIENTEDGE,
+        w!("EDIT"),
+        PCWSTR::null(),
+        style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER, ES_NUMBER),
+        s(78),
+        s(70),
+        s(90),
+        s(22),
+        hwnd,
+        hmenu_id(ID_VISIBLE_DX_EDIT),
+        inst,
+        None,
+    )
+    .unwrap_or_default();
+    st.edit_dx = edit_dx;
+
     // Start/Stop button
     let btn = CreateWindowExW(
         WINDOW_EX_STYLE(0),
@@ -348,7 +372,7 @@ unsafe fn create_controls(st: &mut AppState) {
         w!("Start"),
         style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_DEFPUSHBUTTON),
         s(12),
-        s(74),
+        s(104),
         s(232),
         s(28),
         hwnd,
@@ -365,7 +389,7 @@ unsafe fn create_controls(st: &mut AppState) {
         w!("Start with Windows"),
         ID_AUTOSTART_CHK,
         s(12),
-        s(112),
+        s(142),
         s(232),
         s(20),
         inst,
@@ -377,7 +401,7 @@ unsafe fn create_controls(st: &mut AppState) {
         w!("Start minimized to tray"),
         ID_STARTMIN_CHK,
         s(12),
-        s(136),
+        s(166),
         s(232),
         s(20),
         inst,
@@ -386,7 +410,7 @@ unsafe fn create_controls(st: &mut AppState) {
 
     // Apply default GUI font to all children.
     let font_obj = GetStockObject(DEFAULT_GUI_FONT);
-    for h in [combo, edit, btn, chk_autostart, chk_startmin] {
+    for h in [combo, edit, edit_dx, btn, chk_autostart, chk_startmin] {
         let _ = SendMessageW(
             h,
             WM_SETFONT,
@@ -465,6 +489,10 @@ unsafe fn apply_settings_to_controls(st: &AppState) {
     let s_w: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
     let _ = SetWindowTextW(st.edit_interval, PCWSTR(s_w.as_ptr()));
 
+    let dx = format!("{}", st.settings.visible_dx);
+    let dx_w: Vec<u16> = dx.encode_utf16().chain(Some(0)).collect();
+    let _ = SetWindowTextW(st.edit_dx, PCWSTR(dx_w.as_ptr()));
+
     let _ = SendMessageW(
         st.chk_autostart,
         BM_SETCHECK,
@@ -528,6 +556,21 @@ unsafe fn handle_command(st: &mut AppState, wparam: WPARAM, _lparam: LPARAM) {
                             None,
                         );
                     }
+                    schedule_save(st);
+                }
+            }
+        }
+        ID_VISIBLE_DX_EDIT => {
+            if notif == EN_KILLFOCUS {
+                let val = read_edit_u32(st.edit_dx).unwrap_or(1);
+                let val = val.clamp(1, 100);
+                // Always rewrite the field to canonicalize (reject 0/garbage).
+                let s = format!("{}", val);
+                let s_w: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+                let _ = SetWindowTextW(st.edit_dx, PCWSTR(s_w.as_ptr()));
+                if val != st.settings.visible_dx {
+                    st.settings.visible_dx = val;
+                    st.jiggler.set_visible_dx(val);
                     schedule_save(st);
                 }
             }

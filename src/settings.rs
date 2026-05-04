@@ -18,6 +18,7 @@ use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 pub struct Settings {
     pub mode: String,        // "zen" | "visible"
     pub interval_sec: u32,   // clamped to 1..=86400 on load
+    pub visible_dx: u32,     // pixels per Visible-mode tick, clamped to 1..=100 on load
     pub autostart: bool,
     pub start_minimized: bool,
 }
@@ -27,6 +28,7 @@ impl Default for Settings {
         Self {
             mode: "zen".into(),
             interval_sec: 60,
+            visible_dx: 1,
             autostart: false,
             start_minimized: false,
         }
@@ -39,6 +41,10 @@ impl Settings {
             self.interval_sec = 60;
         }
         self.interval_sec = self.interval_sec.clamp(1, 86400);
+        if self.visible_dx == 0 {
+            self.visible_dx = 1;
+        }
+        self.visible_dx = self.visible_dx.clamp(1, 100);
         let m = self.mode.to_ascii_lowercase();
         if m != "zen" && m != "visible" {
             self.mode = "zen".into();

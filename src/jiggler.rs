@@ -34,15 +34,24 @@ impl Mode {
 pub struct Jiggler {
     pub mode: Mode,
     direction: i32, // +1 or -1, flipped each Visible tick
+    visible_dx: i32, // magnitude of horizontal step in Visible mode (>=1)
 }
 
 impl Jiggler {
-    pub fn new(mode: Mode) -> Self {
-        Self { mode, direction: 1 }
+    pub fn new(mode: Mode, visible_dx: u32) -> Self {
+        Self {
+            mode,
+            direction: 1,
+            visible_dx: visible_dx.clamp(1, 100) as i32,
+        }
     }
 
     pub fn set_mode(&mut self, m: Mode) {
         self.mode = m;
+    }
+
+    pub fn set_visible_dx(&mut self, dx: u32) {
+        self.visible_dx = dx.clamp(1, 100) as i32;
     }
 
     /// Inject a single mouse-move event. Failures (e.g. UIPI / locked desktop)
@@ -51,7 +60,7 @@ impl Jiggler {
         let (dx, dy) = match self.mode {
             Mode::Zen => (0, 0),
             Mode::Visible => {
-                let dx = self.direction;
+                let dx = self.direction * self.visible_dx;
                 self.direction = -self.direction;
                 (dx, 0)
             }
