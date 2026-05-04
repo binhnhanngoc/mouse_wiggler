@@ -56,7 +56,7 @@ pub const WM_TRAY_CALLBACK: u32 = WM_APP + 1;
 /// Resource id for embedded icon (see `app.rc`: `IDI_APP ICON ...`).
 pub const IDI_APP: u16 = 1;
 
-const CLASS_NAME: PCWSTR = w!("MouseWigglerMain");
+pub const CLASS_NAME: PCWSTR = w!("MouseWigglerMain");
 const SAVE_DEBOUNCE_MS: u32 = 250;
 
 // ---- AppState --------------------------------------------------------------
