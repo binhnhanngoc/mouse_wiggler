@@ -6,14 +6,15 @@ Generated from repomix analysis of Mouse Wiggler source tree.
 
 | Module | File | LOC | Purpose | Public API |
 |--------|------|-----|---------|-----------|
-| **main** | `src/main.rs` | 32 | Entry point; DPI init, settings load, autostart reconcile | `fn main()` |
-| **jiggler** | `src/jiggler.rs` | 78 | Input injection core (Zen/Visible modes) | `enum Mode`, `struct Jiggler`, `fn tick()` |
+| **main** | `src/main.rs` | 64 | Entry point; DPI init, settings load, autostart reconcile | `fn main()` |
+| **jiggler** | `src/jiggler.rs` | 87 | Input injection core (Zen/Visible modes) | `enum Mode`, `struct Jiggler`, `fn tick()` |
 | **autostart** | `src/autostart.rs` | 112 | HKCU Run registry helpers | `fn is_enabled()`, `fn set()`, `fn reconcile()` |
-| **settings** | `src/settings.rs` | 91 | JSON load/save, validation | `struct Settings`, `fn load()`, `fn save()` |
-| **window** | `src/window.rs` | 614 | Main window, controls, message loop | `fn run()`, `struct AppState` |
-| **tray** | `src/tray.rs` | 148 | Tray icon + popup menu | `fn add()`, `fn update_tooltip()`, `fn handle_callback()` |
+| **settings** | `src/settings.rs` | 97 | JSON load/save, validation | `struct Settings`, `fn load()`, `fn save()` |
+| **window** | `src/window.rs` | 811 | Main window, controls, message loop | `fn run()`, `struct AppState` |
+| **tray** | `src/tray.rs` | 143 | Tray icon + popup menu | `fn add()`, `fn update_tooltip()`, `fn handle_callback()` |
+| **dpi** | `src/dpi.rs` | 73 | DPI scaling + per-DPI UI font | `fn dpi_for()`, `fn scale()`, `fn ui_font()` |
 
-**Total:** 1,075 LOC (excluding build script, manifests, resources).
+**Total:** 1,387 LOC (excluding build script, manifests, resources).
 
 ## Dependency Graph
 

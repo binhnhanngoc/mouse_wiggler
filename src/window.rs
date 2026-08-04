@@ -2,35 +2,42 @@
 //
 // AppState lives on the heap and is owned by the window through GWLP_USERDATA.
 // It is allocated before CreateWindowExW and dropped in WM_NCDESTROY.
+//
+// DPI: the process is PerMonitorV2. All geometry below is in 96-DPI design
+// units and converted at placement time (`dpi::scale`), so the same table
+// drives the initial layout and every WM_DPICHANGED re-layout.
 
 use std::cell::Cell;
 use std::ptr::null_mut;
 
 use windows::core::{w, PCWSTR, Result};
-use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    GetStockObject, UpdateWindow, COLOR_BTNFACE, DEFAULT_GUI_FONT, HBRUSH,
+    DeleteObject, InvalidateRect, COLOR_BTNFACE, HBRUSH, HFONT, HGDIOBJ,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemServices::SS_LEFT;
-use windows::Win32::UI::Controls::{BST_CHECKED, BST_UNCHECKED};
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Controls::{LoadIconWithScaleDown, BST_CHECKED, BST_UNCHECKED};
+use windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi;
 use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, KillTimer, LoadCursorW,
-    LoadIconW, PostQuitMessage, RegisterClassExW, SendMessageW, SetForegroundWindow,
-    SetTimer, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage,
-    BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX, BS_DEFPUSHBUTTON,
-    CBN_SELCHANGE, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL, CBS_DROPDOWNLIST,
-    CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_KILLFOCUS, ES_NUMBER,
-    GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION, MSG, SC_MINIMIZE, SW_HIDE,
-    SW_SHOW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
-    WM_DESTROY, WM_NCCREATE, WM_NCDESTROY, WM_SETFONT, WM_SYSCOMMAND, WM_TIMER,
+    GetSystemMetrics, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, KillTimer,
+    LoadCursorW, LoadIconW, LoadImageW, PostQuitMessage, RegisterClassExW, SendMessageW,
+    SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    ShowWindow, TranslateMessage, BM_GETCHECK, BM_SETCHECK, BN_CLICKED, BS_AUTOCHECKBOX,
+    BS_DEFPUSHBUTTON, CBN_SELCHANGE, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL,
+    CBS_DROPDOWNLIST, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_KILLFOCUS,
+    ES_NUMBER, GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HICON, HMENU, IDC_ARROW,
+    IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, MSG, SC_MINIMIZE, SM_CXICON, SM_CXSMICON,
+    SM_CYICON, SM_CYSMICON, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_HIDE, SW_SHOW,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY,
+    WM_DPICHANGED, WM_NCCREATE, WM_NCDESTROY, WM_SETFONT, WM_SYSCOMMAND, WM_TIMER,
     WNDCLASSEXW, WS_BORDER, WS_CAPTION, WS_CHILD, WS_EX_CLIENTEDGE, WS_MINIMIZEBOX,
     WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 
+use crate::dpi;
 use crate::jiggler::{Jiggler, Mode};
 use crate::settings::{self, Settings};
 use crate::tray;
@@ -60,6 +67,41 @@ pub const IDI_APP: u16 = 1;
 pub const CLASS_NAME: PCWSTR = w!("MouseWigglerMain");
 const SAVE_DEBOUNCE_MS: u32 = 250;
 
+// ---- Layout table (96-DPI design units) ------------------------------------
+
+/// Rect as (x, y, cx, cy).
+type Rect96 = (i32, i32, i32, i32);
+
+/// Client area the table below is authored against.
+const CLIENT_W: i32 = 256;
+const CLIENT_H: i32 = 200;
+
+const LABEL_COUNT: usize = 5;
+const CONTROL_COUNT: usize = LABEL_COUNT + 6;
+
+const LABEL_TEXT: [PCWSTR; LABEL_COUNT] = [
+    w!("Mode:"),
+    w!("Every:"),
+    w!("seconds"),
+    w!("Pixels:"),
+    w!("px (Visible)"),
+];
+const LABEL_RECT: [Rect96; LABEL_COUNT] = [
+    (12, 12, 60, 18),
+    (12, 42, 60, 18),
+    (178, 42, 70, 18),
+    (12, 72, 60, 18),
+    (178, 72, 70, 18),
+];
+
+/// Combo cy is the dropped-down list height; the closed height follows the font.
+const R_COMBO: Rect96 = (78, 10, 160, 120);
+const R_INTERVAL: Rect96 = (78, 40, 90, 22);
+const R_DX: Rect96 = (78, 70, 90, 22);
+const R_START: Rect96 = (12, 104, 232, 28);
+const R_AUTOSTART: Rect96 = (12, 142, 232, 20);
+const R_STARTMIN: Rect96 = (12, 166, 232, 20);
+
 // ---- AppState --------------------------------------------------------------
 
 pub struct AppState {
@@ -70,6 +112,10 @@ pub struct AppState {
     pub btn_start: HWND,
     pub chk_autostart: HWND,
     pub chk_startmin: HWND,
+    labels: [HWND; LABEL_COUNT],
+    /// UI font owned by this state; recreated on every DPI change.
+    font: HFONT,
+    dpi: u32,
     pub jiggler: Jiggler,
     pub settings: Settings,
     pub running: bool,
@@ -89,10 +135,38 @@ impl AppState {
             btn_start: HWND(null_mut()),
             chk_autostart: HWND(null_mut()),
             chk_startmin: HWND(null_mut()),
+            labels: [HWND(null_mut()); LABEL_COUNT],
+            font: HFONT(null_mut()),
+            dpi: dpi::BASE_DPI,
             jiggler: Jiggler::new(mode, dx),
             settings: cfg,
             running: false,
             suppress_save: Cell::new(true),
+        }
+    }
+
+    /// Every child window, in creation order.
+    fn controls(&self) -> [HWND; CONTROL_COUNT] {
+        let mut all = [HWND(null_mut()); CONTROL_COUNT];
+        all[..LABEL_COUNT].copy_from_slice(&self.labels);
+        all[LABEL_COUNT..].copy_from_slice(&[
+            self.combo,
+            self.edit_interval,
+            self.edit_dx,
+            self.btn_start,
+            self.chk_autostart,
+            self.chk_startmin,
+        ]);
+        all
+    }
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        if !self.font.0.is_null() {
+            unsafe {
+                let _ = DeleteObject(HGDIOBJ(self.font.0));
+            }
         }
     }
 }
@@ -111,9 +185,11 @@ pub fn run(cfg: Settings) -> Result<()> {
             hCursor: LoadCursorW(None, IDC_ARROW)?,
             hbrBackground: HBRUSH((COLOR_BTNFACE.0 as isize + 1) as *mut _),
             lpszClassName: CLASS_NAME,
-            hIcon: LoadIconW(instance, PCWSTR(IDI_APP as *const u16))
-                .or_else(|_| LoadIconW(HMODULE(null_mut()), IDI_APPLICATION))
-                .unwrap_or_default(),
+            hIcon: load_app_icon(GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
+            hIconSm: load_app_icon(
+                GetSystemMetrics(SM_CXSMICON),
+                GetSystemMetrics(SM_CYSMICON),
+            ),
             ..Default::default()
         };
         let atom = RegisterClassExW(&wc);
@@ -125,6 +201,8 @@ pub fn run(cfg: Settings) -> Result<()> {
         let start_minimized = state.settings.start_minimized;
         let state_ptr = Box::into_raw(state);
 
+        // Size is a placeholder: WM_CREATE resizes to the DPI-correct client
+        // area once the window's monitor (and therefore its DPI) is known.
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             CLASS_NAME,
@@ -132,8 +210,8 @@ pub fn run(cfg: Settings) -> Result<()> {
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            260,
-            252,
+            CLIENT_W,
+            CLIENT_H,
             HWND(null_mut()),
             HMENU(null_mut()),
             instance,
@@ -144,7 +222,6 @@ pub fn run(cfg: Settings) -> Result<()> {
             let _ = ShowWindow(hwnd, SW_HIDE);
         } else {
             let _ = ShowWindow(hwnd, SW_SHOW);
-            let _ = UpdateWindow(hwnd);
         }
 
         let mut msg = MSG::default();
@@ -154,6 +231,33 @@ pub fn run(cfg: Settings) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Load the embedded app icon at an explicit pixel size.
+///
+/// `LoadIconW` always yields the SM_CXICON image and lets the shell stretch it,
+/// which is visibly soft in the tray and title bar on high-DPI displays.
+/// `LoadIconWithScaleDown` picks the best frame in the .ico and smooth-scales
+/// it; `LoadImageW` is the fallback if comctl32 is unavailable.
+pub unsafe fn load_app_icon(cx: i32, cy: i32) -> HICON {
+    let inst = GetModuleHandleW(PCWSTR::null()).unwrap_or_default();
+    let name = PCWSTR(IDI_APP as *const u16);
+
+    if let Ok(icon) = LoadIconWithScaleDown(inst, name, cx, cy) {
+        if !icon.0.is_null() {
+            return icon;
+        }
+    }
+
+    if let Ok(h) = LoadImageW(inst, name, IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR) {
+        if !h.0.is_null() {
+            return HICON(h.0);
+        }
+    }
+
+    LoadIconW(inst, name)
+        .or_else(|_| LoadIconW(HMODULE(null_mut()), IDI_APPLICATION))
+        .unwrap_or_default()
 }
 
 // ---- WndProc --------------------------------------------------------------
@@ -186,13 +290,35 @@ extern "system" fn wnd_proc(
                 let p = state_ptr(hwnd);
                 if !p.is_null() {
                     let st = &mut *p;
+                    st.dpi = dpi::dpi_for(hwnd);
+                    st.font = dpi::ui_font(st.dpi);
                     create_controls(st);
+                    apply_font(st);
+                    fit_window(hwnd, st.dpi, None);
+                    relayout(st);
                     apply_settings_to_controls(st);
                     tray::add(hwnd, st.running);
                     if st.settings.autostart {
                         let _ = crate::autostart::reconcile(&st.settings);
                     }
                     st.suppress_save.set(false);
+                }
+                LRESULT(0)
+            }
+
+            // PerMonitorV2: the window moved to a monitor with a different DPI.
+            // wParam LOWORD is the new DPI; lParam is the suggested window rect.
+            WM_DPICHANGED => {
+                let p = state_ptr(hwnd);
+                if !p.is_null() {
+                    let new_dpi = (wparam.0 & 0xFFFF) as u32;
+                    let suggested = lparam.0 as *const RECT;
+                    let pos = if suggested.is_null() {
+                        None
+                    } else {
+                        Some(((*suggested).left, (*suggested).top))
+                    };
+                    rescale(&mut *p, new_dpi, pos);
                 }
                 LRESULT(0)
             }
@@ -280,6 +406,93 @@ extern "system" fn wnd_proc(
     }
 }
 
+// ---- DPI-aware sizing and layout ------------------------------------------
+
+/// Resize the window so its *client* area is CLIENT_W x CLIENT_H at `dpi`.
+/// `pos` moves the window as well (used by WM_DPICHANGED).
+unsafe fn fit_window(hwnd: HWND, dpi: u32, pos: Option<(i32, i32)>) {
+    let mut rc = RECT {
+        left: 0,
+        top: 0,
+        right: dpi::scale(CLIENT_W, dpi),
+        bottom: dpi::scale(CLIENT_H, dpi),
+    };
+    let style = WINDOW_STYLE(GetWindowLongPtrW(hwnd, GWL_STYLE) as u32);
+    let ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
+    let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, dpi);
+
+    let (x, y, flags) = match pos {
+        Some((x, y)) => (x, y, SWP_NOZORDER | SWP_NOACTIVATE),
+        None => (0, 0, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE),
+    };
+    let _ = SetWindowPos(
+        hwnd,
+        HWND(null_mut()),
+        x,
+        y,
+        rc.right - rc.left,
+        rc.bottom - rc.top,
+        flags,
+    );
+}
+
+/// Position every child from the design-unit table at the current DPI.
+unsafe fn relayout(st: &AppState) {
+    for (i, h) in st.labels.iter().enumerate() {
+        place(*h, LABEL_RECT[i], st.dpi);
+    }
+    place(st.combo, R_COMBO, st.dpi);
+    place(st.edit_interval, R_INTERVAL, st.dpi);
+    place(st.edit_dx, R_DX, st.dpi);
+    place(st.btn_start, R_START, st.dpi);
+    place(st.chk_autostart, R_AUTOSTART, st.dpi);
+    place(st.chk_startmin, R_STARTMIN, st.dpi);
+}
+
+unsafe fn place(h: HWND, r: Rect96, dpi: u32) {
+    if h.0.is_null() {
+        return;
+    }
+    let _ = SetWindowPos(
+        h,
+        HWND(null_mut()),
+        dpi::scale(r.0, dpi),
+        dpi::scale(r.1, dpi),
+        dpi::scale(r.2, dpi),
+        dpi::scale(r.3, dpi),
+        SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+}
+
+unsafe fn apply_font(st: &AppState) {
+    for h in st.controls() {
+        if h.0.is_null() {
+            continue;
+        }
+        let _ = SendMessageW(h, WM_SETFONT, WPARAM(st.font.0 as usize), LPARAM(1));
+    }
+}
+
+/// Re-fit window, font and controls for `new_dpi` (WM_DPICHANGED).
+unsafe fn rescale(st: &mut AppState, new_dpi: u32, pos: Option<(i32, i32)>) {
+    st.dpi = if new_dpi == 0 { dpi::BASE_DPI } else { new_dpi };
+
+    let new_font = dpi::ui_font(st.dpi);
+    if !new_font.0.is_null() {
+        // Swap first, then delete: the old font must not be in use by any
+        // control when DeleteObject runs.
+        let old = std::mem::replace(&mut st.font, new_font);
+        apply_font(st);
+        if !old.0.is_null() {
+            let _ = DeleteObject(HGDIOBJ(old.0));
+        }
+    }
+
+    fit_window(st.hwnd, st.dpi, pos);
+    relayout(st);
+    let _ = InvalidateRect(st.hwnd, None, true);
+}
+
 // ---- Control creation -----------------------------------------------------
 
 fn hmenu_id(id: u16) -> HMENU {
@@ -290,30 +503,29 @@ fn style_with_class(base: WINDOW_STYLE, class_style: i32) -> WINDOW_STYLE {
     WINDOW_STYLE(base.0 | class_style as u32)
 }
 
+/// Controls are created at the origin with zero size; `relayout` places them so
+/// the layout table has exactly one consumer.
 unsafe fn create_controls(st: &mut AppState) {
     let hwnd = st.hwnd;
-    let dpi = GetDpiForWindow(hwnd);
-    let scale = if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 };
-    let s = |v: i32| -> i32 { (v as f32 * scale).round() as i32 };
-
     let inst = GetModuleHandleW(PCWSTR::null()).unwrap_or_default();
 
-    create_static(hwnd, w!("Mode:"), s(12), s(12), s(60), s(20), inst);
-    create_static(hwnd, w!("Every:"), s(12), s(42), s(60), s(20), inst);
-    create_static(hwnd, w!("seconds"), s(178), s(42), s(70), s(20), inst);
-    create_static(hwnd, w!("Pixels:"), s(12), s(72), s(60), s(20), inst);
-    create_static(hwnd, w!("px (Visible)"), s(178), s(72), s(70), s(20), inst);
+    for (i, text) in LABEL_TEXT.iter().enumerate() {
+        st.labels[i] = create_static(hwnd, *text, inst);
+    }
 
     // Mode combo
     let combo = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("COMBOBOX"),
         PCWSTR::null(),
-        style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL, CBS_DROPDOWNLIST),
-        s(78),
-        s(10),
-        s(160),
-        s(120),
+        style_with_class(
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL,
+            CBS_DROPDOWNLIST,
+        ),
+        0,
+        0,
+        0,
+        0,
         hwnd,
         hmenu_id(ID_MODE_COMBO),
         inst,
@@ -330,144 +542,90 @@ unsafe fn create_controls(st: &mut AppState) {
     );
 
     // Interval edit
-    let edit = CreateWindowExW(
+    st.edit_interval = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         w!("EDIT"),
         PCWSTR::null(),
         style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER, ES_NUMBER),
-        s(78),
-        s(40),
-        s(90),
-        s(22),
+        0,
+        0,
+        0,
+        0,
         hwnd,
         hmenu_id(ID_INTERVAL_EDIT),
         inst,
         None,
     )
     .unwrap_or_default();
-    st.edit_interval = edit;
 
     // Visible-mode dx edit
-    let edit_dx = CreateWindowExW(
+    st.edit_dx = CreateWindowExW(
         WS_EX_CLIENTEDGE,
         w!("EDIT"),
         PCWSTR::null(),
         style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER, ES_NUMBER),
-        s(78),
-        s(70),
-        s(90),
-        s(22),
+        0,
+        0,
+        0,
+        0,
         hwnd,
         hmenu_id(ID_VISIBLE_DX_EDIT),
         inst,
         None,
     )
     .unwrap_or_default();
-    st.edit_dx = edit_dx;
 
     // Start/Stop button
-    let btn = CreateWindowExW(
+    st.btn_start = CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("BUTTON"),
         w!("Start"),
         style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_DEFPUSHBUTTON),
-        s(12),
-        s(104),
-        s(232),
-        s(28),
+        0,
+        0,
+        0,
+        0,
         hwnd,
         hmenu_id(ID_START_BTN),
         inst,
         None,
     )
     .unwrap_or_default();
-    st.btn_start = btn;
 
-    // Checkboxes
-    let chk_autostart = create_checkbox(
-        hwnd,
-        w!("Start with Windows"),
-        ID_AUTOSTART_CHK,
-        s(12),
-        s(142),
-        s(232),
-        s(20),
-        inst,
-    );
-    st.chk_autostart = chk_autostart;
-
-    let chk_startmin = create_checkbox(
-        hwnd,
-        w!("Start minimized to tray"),
-        ID_STARTMIN_CHK,
-        s(12),
-        s(166),
-        s(232),
-        s(20),
-        inst,
-    );
-    st.chk_startmin = chk_startmin;
-
-    // Apply default GUI font to all children.
-    let font_obj = GetStockObject(DEFAULT_GUI_FONT);
-    for h in [combo, edit, edit_dx, btn, chk_autostart, chk_startmin] {
-        let _ = SendMessageW(
-            h,
-            WM_SETFONT,
-            WPARAM(font_obj.0 as usize),
-            LPARAM(1),
-        );
-    }
+    st.chk_autostart =
+        create_checkbox(hwnd, w!("Start with Windows"), ID_AUTOSTART_CHK, inst);
+    st.chk_startmin =
+        create_checkbox(hwnd, w!("Start minimized to tray"), ID_STARTMIN_CHK, inst);
 }
 
-unsafe fn create_static(
-    parent: HWND,
-    text: PCWSTR,
-    x: i32,
-    y: i32,
-    cx: i32,
-    cy: i32,
-    inst: HMODULE,
-) -> HWND {
-    let h = CreateWindowExW(
+unsafe fn create_static(parent: HWND, text: PCWSTR, inst: HMODULE) -> HWND {
+    CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("STATIC"),
         text,
         style_with_class(WS_CHILD | WS_VISIBLE, SS_LEFT.0 as i32),
-        x,
-        y,
-        cx,
-        cy,
+        0,
+        0,
+        0,
+        0,
         parent,
         HMENU(null_mut()),
         inst,
         None,
     )
-    .unwrap_or_default();
-    let font_obj = GetStockObject(DEFAULT_GUI_FONT);
-    let _ = SendMessageW(h, WM_SETFONT, WPARAM(font_obj.0 as usize), LPARAM(1));
-    h
+    .unwrap_or_default()
 }
 
-unsafe fn create_checkbox(
-    parent: HWND,
-    text: PCWSTR,
-    id: u16,
-    x: i32,
-    y: i32,
-    cx: i32,
-    cy: i32,
-    inst: HMODULE,
-) -> HWND {
+unsafe fn create_checkbox(parent: HWND, text: PCWSTR, id: u16, inst: HMODULE) -> HWND {
     CreateWindowExW(
         WINDOW_EX_STYLE(0),
         w!("BUTTON"),
         text,
         style_with_class(WS_CHILD | WS_VISIBLE | WS_TABSTOP, BS_AUTOCHECKBOX),
-        x,
-        y,
-        cx,
-        cy,
+        0,
+        0,
+        0,
+        0,
         parent,
         hmenu_id(id),
         inst,

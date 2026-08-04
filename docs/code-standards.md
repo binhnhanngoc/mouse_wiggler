@@ -12,14 +12,15 @@ Codebase-specific conventions and best practices for Mouse Wiggler.
 
 | File | Purpose | Max LOC |
 |------|---------|---------|
-| `src/main.rs` | Entry, DPI init, bootstrap | 40 |
+| `src/main.rs` | Entry, DPI init, bootstrap | 70 |
 | `src/jiggler.rs` | Input injection | 100 |
 | `src/autostart.rs` | Registry helpers | 120 |
 | `src/settings.rs` | Persistence, validation | 100 |
-| `src/window.rs` | GUI, message loop | 650 |
+| `src/window.rs` | GUI, DPI layout, message loop | 850 |
 | `src/tray.rs` | Tray icon, menu | 150 |
+| `src/dpi.rs` | DPI scaling, UI font | 100 |
 
-**Guideline:** Keep individual modules ≤ 200 LOC where practical. Existing `window.rs` (614 LOC) is acceptable due to tight Win32 integration; future modules should aim for ≤ 150 LOC.
+**Guideline:** Keep individual modules ≤ 200 LOC where practical. Existing `window.rs` (811 LOC) is acceptable due to tight Win32 integration; future modules should aim for ≤ 150 LOC.
 
 ## Naming Conventions
 

@@ -2,24 +2,21 @@
 // Single icon registered with WM_APP+1 callback. Right-click → popup menu;
 // left-click / double-click → restore main window.
 
-use std::ptr::null_mut;
-
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, POINT, WPARAM};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, LoadIconW, PostMessageW,
-    SetForegroundWindow, ShowWindow, TrackPopupMenu, HICON, IDI_APPLICATION, MF_SEPARATOR,
-    MF_STRING, SW_SHOW, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
-    WM_NULL, WM_RBUTTONUP,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, PostMessageW,
+    SetForegroundWindow, ShowWindow, TrackPopupMenu, HICON, MF_SEPARATOR, MF_STRING,
+    SM_CXSMICON, SM_CYSMICON, SW_SHOW, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON, WM_LBUTTONDBLCLK,
+    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
 };
 
 use crate::window::{
-    AppState, ID_TRAY_EXIT, ID_TRAY_SHOW, ID_TRAY_TOGGLE, IDI_APP, TRAY_ICON_ID,
+    self, AppState, ID_TRAY_EXIT, ID_TRAY_SHOW, ID_TRAY_TOGGLE, TRAY_ICON_ID,
     WM_TRAY_CALLBACK,
 };
 
@@ -39,12 +36,10 @@ fn tooltip(running: bool) -> [u16; 128] {
     buf
 }
 
-fn load_app_icon() -> HICON {
+/// Tray icons are drawn at the shell's small-icon size, which scales with DPI.
+fn tray_icon() -> HICON {
     unsafe {
-        let inst = GetModuleHandleW(PCWSTR::null()).unwrap_or(HMODULE(null_mut()));
-        LoadIconW(inst, PCWSTR(IDI_APP as *const u16))
-            .or_else(|_| LoadIconW(HMODULE(null_mut()), IDI_APPLICATION))
-            .unwrap_or_default()
+        window::load_app_icon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON))
     }
 }
 
@@ -55,7 +50,7 @@ pub fn add(hwnd: HWND, running: bool) {
         uID: TRAY_ICON_ID,
         uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
         uCallbackMessage: WM_TRAY_CALLBACK,
-        hIcon: load_app_icon(),
+        hIcon: tray_icon(),
         ..Default::default()
     };
     nid.szTip = tooltip(running);

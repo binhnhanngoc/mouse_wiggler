@@ -82,6 +82,7 @@ mouse_wiggler/
 │   ├── autostart.rs             # Registry HKCU Run helper
 │   ├── settings.rs              # Load/save settings.json
 │   ├── window.rs                # Main window: controls, message loop, timer
+│   ├── dpi.rs                   # DPI scaling helpers + per-DPI UI font
 │   └── tray.rs                  # Tray icon + popup menu
 │
 ├── assets/
@@ -108,7 +109,8 @@ All vendored in `windows` 0.58 crate (Win32 bindings):
 - Tray: `Shell_NotifyIconW`, `TrackPopupMenu`
 - Registry: `RegOpenKeyExW`, `RegSetValueExW`, `RegDeleteValueW`
 - Settings: `serde`, `serde_json`
-- DPI: `SetProcessDpiAwarenessContext` (PerMonitorV2)
+- DPI: `SetProcessDpiAwarenessContext` (PerMonitorV2), `GetDpiForWindow`,
+  `AdjustWindowRectExForDpi`, `SystemParametersInfoForDpi`, `WM_DPICHANGED`
 
 ## Compile & Size Goals
 

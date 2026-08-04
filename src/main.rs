@@ -5,6 +5,7 @@
 #![windows_subsystem = "windows"]
 
 mod autostart;
+mod dpi;
 mod jiggler;
 mod settings;
 mod tray;

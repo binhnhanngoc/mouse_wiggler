@@ -410,9 +410,19 @@ settings::save()
 
 **Fallback:** `SetProcessDpiAwarenessContext(PER_MONITOR_V2)` in `main()`.
 
-**Benefit:** Window and controls scale correctly on high-DPI displays (e.g., Surface, 4K monitors).
+**Custom scaling is required.** A PerMonitorV2 process receives *physical* pixels from
+Win32 — nothing is auto-scaled. `src/dpi.rs` + the layout table in `src/window.rs` do it:
 
-**No custom DPI handling:** Windows handles scaling automatically; application uses logical pixels only.
+| Concern | Handling |
+|---------|----------|
+| Geometry | One design-unit table (96 DPI) → `dpi::scale(v, dpi)` at placement time. `relayout()` is the single consumer, used for both initial layout and rescale. |
+| Window size | `AdjustWindowRectExForDpi()` on the scaled client rect (`CLIENT_W` × `CLIENT_H`) → `SetWindowPos`. Never a hardcoded pixel size. |
+| Font | `SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, dpi)` → `lfMessageFont` → `CreateFontIndirectW`. Owned by `AppState`, deleted in `Drop`. (`DEFAULT_GUI_FONT` is a fixed-size bitmap font and does not scale.) |
+| Monitor change | `WM_DPICHANGED` → `rescale()`: new font, window moved/sized to the suggested rect, children re-placed, repaint. |
+| Icons | `LoadImageW` at `SM_CXICON` / `SM_CXSMICON` instead of `LoadIconW`, so the tray and title bar get a native-size image rather than a stretched 32×32. |
+
+**Benefit:** Window and controls are correct at 100/125/150/175/200% and follow the
+monitor when the window is dragged between displays of different DPI.
 
 ## Resource Embedding
 
